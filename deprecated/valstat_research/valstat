@@ -1,0 +1,21 @@
+#pragma once
+/*
+(c) 2020 by dbj@dbj.org CC BY SA 4.0
+*/
+
+#include <optional>
+
+namespace std {
+
+  template< typename T, typename S>
+  struct valstat final {
+
+     using value_type  = T;
+     using status_type = S ;
+
+     std::optional<T> value  ;
+     std::optional<S> status ;
+    
+  }; // valstat
+
+} // std
