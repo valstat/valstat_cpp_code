@@ -1,5 +1,6 @@
-# metastate_code
- Various metatastate implementations
+# Valstat C++ Research 
+ 
+ Various implementations
 
 ---
 
