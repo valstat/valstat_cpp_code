@@ -1,5 +1,5 @@
-// https://godbolt.org/z/GMTWfs837
-// (c) 2022 by dbj@dbj.org
+// https://godbolt.org/z/Woes1jrdx
+// (c) by dbj@dbj.org
 // valstat idea ad-hoc application to the
 // dynamic buffer of trivially copyable types
 // by no means finished either in design or in implementation
@@ -53,6 +53,23 @@ class not_a_vector {
   size_t capacity_ = initial_capacity_;
   T *arr_ = nullptr;
 
+  // again thanks to valstat we do not exit on assert
+  // if size requested is too big
+  errno_valstat resize_(std::size_t newSize) {
+
+    if (1 > newSize) return {EINVAL, "Bad argument: size < 1"};
+    if ( newSize > this->capacity_)  return {EINVAL, "newSize > this->capacity_"};
+    
+  // NOTE: hack ahead, we do not realloc as capacity == MAX_CAP
+    if (this->is_empty()) {
+      this->arr_ = static_cast<T *>(::calloc( this->initial_capacity_, sizeof(T) ));
+    if (this->arr_ == nullptr)
+      return {ENOMEM, "No enough memory"};
+    }
+    this->size_ = newSize;
+    return {0 /* OK */, nullptr};
+  }
+
  public:
   /// at strategic places we return VALSTAT(tm)
   /// https://github.com/valstat
@@ -71,13 +88,17 @@ class not_a_vector {
   size_t capacity() const noexcept { return capacity_; }
 
   /// each valstat is made of two fields
-  /// CRUCIAL: field must be able to be tested for emptiness
+  /// CRUCIAL: user must be able to test each field for 'emptiness' too
+  /// there are two valstats in this class
+  /// this one returns the class instanace by value
+  /// this class has the bool empty() method
   struct valstat_make_rezult final {
     type val;            /// empty default not_a_vector<T>
     const char *stat{};  /// if not null means error stat-us
   };
 
   /// making is allowed through a factory method only
+  /// argument is an native array
   /// note: making != constructing
   template <size_t N>
   static valstat_make_rezult make(const T (&arr)[N]) {
@@ -90,8 +111,10 @@ class not_a_vector {
 
     if (err_ != 0)
       /// resize has failed, we pass out the error message
+      /// with the empty value
       return {std::move(retval_), msg_};
 
+    /// copy the array param to the retval
     memcpy(retval_.arr_, arr, N);
     retval_.size_ = N;
 
@@ -102,7 +125,6 @@ class not_a_vector {
     };
   }
 
-
   // making from pointers to arrays is a problematic proposal
   template <size_t N>
   static type make(const T (*arr)[N]) = delete;
@@ -112,20 +134,9 @@ class not_a_vector {
   static type make(const T *(&arr)[N]) = delete;
 
   /// default not_vector is empty!
-  /// that is its behaviour
-  not_a_vector() noexcept : size_(0), arr_(nullptr) {
-    /// we could ignore the valstat type returned as we know
-    /// the initial capacity is < MAX_CAP
-    /// and sadly we do not use exceptions
-    /// and we can not return values from ctors
-    /// auto [err, msg] = resize_(type::initial_capacity_);
-    /// assert((err == 0) && "Err must be zero here");
-  }
+  not_a_vector() noexcept = default;
 
   /// default constructed not_vector is empty!
-  /// that is its default behaviour
-  /// valstat RFC demands vlastat filed to be in two primary states
-  ///  empty and not empty
   bool is_empty(void) const noexcept {
     return (size_ == 0) && (arr_ == nullptr);
   }
@@ -144,11 +155,6 @@ class not_a_vector {
   not_a_vector &operator=(not_a_vector const &) noexcept = delete;
 
   not_a_vector(not_a_vector &&other_) noexcept {
-    //if (other_.size_ > 0) {
-    //  /// we can ignore the return from resize_
-    //  /// as it is made to fit, by our code in this class
-    //  this->resize_(other_.size_);
-    //}
     this->arr_ = other_.arr_;
     this->size_ = other_.size_;
     other_.arr_ = nullptr;
@@ -156,11 +162,6 @@ class not_a_vector {
 
   not_a_vector &operator=(not_a_vector &&other_) &noexcept {
     if (this != &other_) {
-      //if (other_.size_ > 0) {
-      //  /// again we can ignore the return from resize_
-      //  /// as it is made to fit, by our code in this class
-      //  (void)this->resize_(other_.size_);
-      //}
       this->arr_ = other_.arr_;
       this->size_ = other_.size_;
       other_.arr_ = nullptr;
@@ -175,13 +176,15 @@ class not_a_vector {
   /// special complex return types !
 
   valstat operator[](size_t idx) {
-    if (idx > this->size_) {
+    
+    if (idx >= this->size_) {
       // errno = EINVAL;
       // perror("Bad index!");
       // exit(EXIT_FAILURE);
       // instead of above, we use valstat
-      return {nullptr, "Bad index!"};
+      return {0, "Bad index!"};
     }
+
     return {&(this->arr_[idx]), nullptr};
   }
 
@@ -217,39 +220,23 @@ class not_a_vector {
   T const * cbegin() const noexcept { return this->arr_; }
   T const * cend() const noexcept { return this->arr_ + this->size_; }
 
- private:
-  // again thanks to valstat we do not exit on assert
-  // if size requested is too big
-  errno_valstat resize_(std::size_t newSize) {
-
-     if (1 > newSize) return {EINVAL, "Bad argument: size < 1"};
-
-    if (this->is_empty()) {
-      this->arr_ = static_cast<T *>(::calloc( this->initial_capacity_, sizeof(T) ));
-    if (this->arr_ == nullptr)
-      return {ENOMEM, "No enough memory"};
-    } else {
-      if ( newSize > this->capacity_)
-        return {EINVAL, "newSize > this->capacity_"};
-    }
-    this->size_ = newSize;
-    return {0 /* OK */, nullptr};
-  }
-};  //////////////////////////////////////////////////////////
+};  // not_a_vector ///////////////////////////////////////////////////////
 
 // move in, print data, move out
 decltype(auto) hammer = [](auto &&nv_) {
-  for (auto e_ : nv_) printf("%c", e_);
+  for (const auto &  e_ : nv_) printf("%c", e_);
   printf("\n");
   return std::move(nv_);  // no copy
 };
+   
+using nvc = not_a_vector<char>;
 
-int main() {
+int main(void) {
   {
     // we can just ignore the valstat returns
     // and have the simple and stupid code
-    using nvc = not_a_vector<char>;
-    nvc v2;
+     nvc v2;
+
 
     auto [vec_, stat_] = nvc::make("PAYLOAD");
     // no copy allowed --> v2 = vec_ ;
@@ -283,3 +270,10 @@ int main() {
 
   return 42;
 }
+
+// compile time checks cost nothing
+// always do this
+static_assert(std::is_default_constructible_v<nvc> );
+static_assert(std::is_nothrow_default_constructible_v<nvc> );
+// and this too?
+// static_assert(std::is_trivially_default_constructible_v<nvc> );
